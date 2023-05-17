@@ -1,0 +1,18 @@
+[package]
+name = "pwcheck"
+description = "Provides typed variants of Path and PathBuf for Unix and Windows"
+version = "0.1.0"
+edition = "2021"
+authors = ["Chip Senkbeil <chip@senkbeil.org>"]
+categories = ["authentication"]
+keywords = ["password", "security"]
+homepage = "https://github.com/chipsenkbeil/pwcheck"
+repository = "https://github.com/chipsenkbeil/pwcheck"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.48", features = ["Win32_Foundation", "Win32_Security"] }
+
+[target.'cfg(unix)'.dependencies]
+portable-pty = "0.8.1"
