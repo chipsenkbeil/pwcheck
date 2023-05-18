@@ -14,7 +14,7 @@ on:
 
 jobs:
   clippy:
-    name: "Lint with clippy (${{ matrix.os }})"
+    name: "(${{ matrix.os }}) Lint with clippy"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -30,6 +30,9 @@ jobs:
           git config --system core.autocrlf false
           git config --system core.eol lf
         if: matrix.os == 'windows-latest'
+      - name: Install PAM devel (Linux)
+        run: sudo apt install -y libpam0g-dev
+        if: matrix.os == 'ubuntu-latest'
       - uses: actions/checkout@v3
       - name: Install Rust (clippy)
         uses: actions-rs/toolchain@v1
@@ -43,7 +46,7 @@ jobs:
       - name: Clippy check
         run: cargo clippy --verbose --all-features
   rustfmt:
-    name: "Verify code formatting (${{ matrix.os }})"
+    name: "(${{ matrix.os }}) Verify code formatting"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -57,6 +60,9 @@ jobs:
           git config --system core.autocrlf false
           git config --system core.eol lf
         if: matrix.os == 'windows-latest'
+      - name: Install PAM devel (Linux)
+        run: sudo apt install -y libpam0g-dev
+        if: matrix.os == 'ubuntu-latest'
       - uses: actions/checkout@v3
       - name: Install Rust (rustfmt)
         uses: actions-rs/toolchain@v1
@@ -69,11 +75,8 @@ jobs:
         run: cargo --version
       - run: cargo fmt --all -- --check
   tests:
-    name: "Test Rust ${{ matrix.rust }} on ${{ matrix.os }}"
+    name: "(${{ matrix.os }}) Test Rust ${{ matrix.rust }} ${{ matrix.target }}"
     runs-on: ${{ matrix.os }}
-    env:
-      RUSTFLAGS: --cfg ci
-      RUST_LOG: trace
     strategy:
       fail-fast: false
       matrix:
@@ -83,13 +86,17 @@ jobs:
           - { rust: stable, os: ubuntu-latest }
           - { rust: 1.64.0, os: ubuntu-latest }
     steps:
+      - name: Install PAM devel (Linux)
+        run: sudo apt install -y libpam0g-dev
+        if: matrix.os == 'ubuntu-latest'
       - uses: actions/checkout@v3
-      - name: Install Rust ${{ matrix.rust }}
+      - name: Install Rust ${{ matrix.rust }} (MacOS/Windows)
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
+        if: matrix.os != 'ubuntu-latest'
       - name: Generate randoms
         uses: joellefkowitz/random-env@v1.0.0
         with:
@@ -113,5 +120,14 @@ jobs:
         run: |
           net user /Y /add "${{ env.PWCHECK_TEST_USERNAME }}" "${{ env.PWCHECK_TEST_PASSWORD }}"
         if: matrix.os == 'windows-latest'
-      - name: Run tests
+      - name: Run tests (MacOS/Windows)
         run: cargo test --release --all-features
+        if: matrix.os != 'ubuntu-latest'
+      - name: Install Rust ${{ matrix.rust }} & tests as testuser (Linux)
+        run: |
+          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain ${{ matrix.rust }}
+          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} mkdir /home/testuser/pwcheck
+          sudo cp -R . /home/testuser/pwcheck/
+          sudo chown -R ${{ env.PWCHECK_TEST_USERNAME }} /home/testuser/pwcheck/
+          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} bash -c ". \"/home/testuser/.cargo/env\" && cd /home/testuser/pwcheck && export PWCHECK_TEST_USERNAME=${{ env.PWCHECK_TEST_USERNAME }} && export PWCHECK_TEST_PASSWORD=${{ env.PWCHECK_TEST_PASSWORD }} && cargo test --release --all-features"
+        if: matrix.os == 'ubuntu-latest'

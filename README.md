@@ -14,12 +14,26 @@
 Provides a singular function to check and validate the password of a local user
 account on Linux, MacOS, and Windows.
 
+> Currently does not work on Linux using musl due to
+> https://github.com/1wilkens/pam/issues/25. Will result in SIGSEGV!
+
 ## Install
 
 ```toml
 [dependencies]
-pwcheck = "0.1"
+pwcheck = "0.2"
 ```
+
+### Dependencies
+
+* On `Linux`, this leverages PAM bindings and therefore requires PAM developer
+  headersto be available. 
+  * **Debian/Ubuntu:** `apt install libpam0g-dev`
+  * **Fedora/CentOS:** `dnf install pam-devel` (you may also need `dnf install
+    clang` if you get `stddef.h not found`)
+* On `MacOS`, this leverages `dscl`, and does not need anything additional.
+* On `Windows`, this leverages [windows-rs](https://crates.io/crates/windows)
+  and does not need anything additional.
 
 ## Usage
 
@@ -38,31 +52,104 @@ fn main() {
 
 ## How It Works
 
-### Unix
+### Linux
 
-On Unix platforms, this leverages executing `su` to attempt to log into the user's account and
-echo out a confirmation string. This requires that `su` be available, the underlying shell be
-able to receive `-c` to execute a command, and `echo UNIQUE_CONFIRMATION` be a valid command.
+On Linux platforms, this leverages PAM with the login service to perform
+authentication in a non-interactive fashion via a username and password.
 
-For most platforms, this will result in using PAM to authenticate the user by their password,
-which we feed in by running the `su` command in a tty and echoing the user's password into the
-tty as if it was entered manually by a keyboard.
+You can specify a different service with the Linux module's implementation:
 
-This method acts as a convenience around the `unix` module's implementation, and provides a
-default timeout of 0.5s to wait for a success or failure before timing out.
+```rust,no_run
+use pwcheck::PwcheckResult;
+
+fn main() {
+    #[cfg(target_os = "linux")]
+    {
+        use pwcheck::linux::{Method, pwcheck};
+        match pwcheck(Method::Pam {
+            username: "username",
+            password: "password",
+            service: "my-service",
+        }) {
+            PwcheckResult::Ok => println!("Correct username & password!"),
+            PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
+            PwcheckResult::Err(x) => println!("Encountered error: {x}"),
+        }
+    }
+}
+```
+
+Note that PAM authentication will only work for a username and password if
+either:
+
+a. The username matches the one performing the authentication
+b. The user doing authentication has elevated permissions
+
+In other words, an ordinary user cannot authenticate the username and password
+of a different user. This will instead return an error about a wrong password.
+
+### MacOS
+
+On MacOS platforms, this leverages executing `dscl` to authenticate the user
+using the datasource "." (local directory).
+
+You can specify a different datasource with the MacOS module's implementation:
+
+```rust,no_run
+use pwcheck::PwcheckResult;
+
+fn main() {
+    #[cfg(target_os = "macos")]
+    {
+        use pwcheck::macos::{Method, pwcheck};
+        match pwcheck::macos::pwcheck(Method::Dscl {
+            username: "username", 
+            password: "password", 
+            datasource: "/Login/Default", 
+            timeout: None,
+        }) {
+            PwcheckResult::Ok => println!("Correct username & password!"),
+            PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
+            PwcheckResult::Err(x) => println!("Encountered error: {x}"),
+        }
+    }
+}
+```
 
 ### Windows
 
-On Windows platforms, this leverages the
-[LogonUserW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw)
-function to attempt to log a user on to the local computer.
+On Windows platforms, this leverages the [LogonUserW][LogonUserW] function to
+attempt to log a user on to the local computer.
 
-Note that this function requires the running program to have the [SeTcbPrivilege
-privilege][SeTcbPrivilege] set in order to log in as a user other than the user that started
-the program. So it's safe to use this to validate the account of the user running this program,
-but otherwise it needs a very high-level permission to validate the password, typically
-something you'd see from running the program as an administrator.
+You can execute the Windows module implementation directly like below:
 
+```rust,no_run
+use pwcheck::PwcheckResult;
+
+fn main() {
+    #[cfg(windows)]
+    {
+        use pwcheck::windows::{Method, pwcheck};
+        match pwcheck::windows::pwcheck(Method::LogonUserW {
+            username: "username", 
+            password: "password", 
+        }) {
+            PwcheckResult::Ok => println!("Correct username & password!"),
+            PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
+            PwcheckResult::Err(x) => println!("Encountered error: {x}"),
+        }
+    }
+}
+```
+
+Note that this function requires the running program to have the
+[SeTcbPrivilege privilege][SeTcbPrivilege] set in order to log in as a user
+other than the user that started the program. So it's safe to use this to
+validate the account of the user running this program, but otherwise it needs a
+very high-level permission to validate the password, typically something you'd
+see from running the program as an administrator.
+
+[LogonUserW]: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw
 [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
 
 ## License

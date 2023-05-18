@@ -7,24 +7,34 @@ pub struct ReadmeDoctests;
 
 /// Checks the password against the specified username.
 ///
-/// ### Unix
+/// ### Linux
 ///
-/// On Unix platforms, this leverages executing `su` to attempt to log into the user's account and
-/// echo out a confirmation string. This requires that `su` be available, the underlying shell be
-/// able to receive `-c` to execute a command, and `echo UNIQUE_CONFIRMATION` be a valid command.
+/// On Linux, this leverages PAM with the login service to perform authentication in a
+/// non-interactive fashion via a username and password.
 ///
-/// For most platforms, this will result in using PAM to authenticate the user by their password,
-/// which we feed in by running the `su` command in a tty and echoing the user's password into the
-/// tty as if it was entered manually by a keyboard.
+/// This method acts as a convenience to the `linux` module's implementation, and provides a service
+/// of "login" for use with PAM.
 ///
-/// This method acts as a convenience around the `unix` module's implementation, and provides a
-/// default timeout of 0.5s to wait for a success or failure before timing out.
+/// Note that PAM authentication will only work for a username and password if either:
+///
+/// a. The username matches the one performing the authentication
+/// b. The user doing authentication has elevated permissions
+///
+/// In other words, an ordinary user cannot authenticate the username and password of a
+/// different user. This will instead return an error about a wrong password.
+///
+/// ### MacOS
+///
+/// On MacOS, this leverages the `dscl` tool with `-authonly` to authenticate the user.
+///
+/// This method acts as a convenience to the `macos` module's implementation, and provides a
+/// datasource of "." (local directory) and timeout of 0.5s to wait for a success or failure before
+/// timing out.
 ///
 /// ### Windows
 ///
-/// On Windows platforms, this leverages the
-/// [LogonUserW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw)
-/// function to attempt to log a user on to the local computer.
+/// On Windows platforms, this leverages the [LogonUserW][LogonUserW] function to attempt to log a
+/// user on to the local computer.
 ///
 /// Note that this function requires the running program to have the [SeTcbPrivilege
 /// privilege][SeTcbPrivilege] set in order to log in as a user other than the user that started
@@ -32,35 +42,125 @@ pub struct ReadmeDoctests;
 /// but otherwise it needs a very high-level permission to validate the password, typically
 /// something you'd see from running the program as an administrator.
 ///
+/// This method acts as a convenience to the `windows` module's implementation.
+///
+/// [LogonUserW]: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw
 /// [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
 pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
+        const SERVICE: &str = "login";
+        linux::pwcheck(linux::Method::Pam {
+            username,
+            password,
+            service: SERVICE,
+        })
+    }
+    #[cfg(target_os = "macos")]
+    {
+        const DATASOURCE: &str = ".";
         const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
-        unix::pwcheck(username, password, TIMEOUT)
+        macos::pwcheck(macos::Method::Dscl {
+            username,
+            password,
+            datasource: DATASOURCE,
+            timeout: Some(TIMEOUT),
+        })
     }
     #[cfg(windows)]
     {
-        windows::pwcheck(username, password)
+        windows::pwcheck(windows::Method::LogonUserW { username, password })
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        compile_error!("Only Linux, MacOS, and Windows are supported!");
     }
 }
 
-#[cfg(unix)]
-#[cfg_attr(doc_cfg, doc(cfg(unix)))]
-pub mod unix {
+#[cfg(any(all(doc, doc_cfg), target_os = "linux"))]
+#[cfg_attr(doc_cfg, doc(cfg(target_os = "linux")))]
+pub mod linux {
+    use super::PwcheckResult;
+
+    /// Methods available on Linux to perform password checks.
+    pub enum Method<'a> {
+        /// Leveraging PAM to authenticate. This method accepts a third argument, `service`, which
+        /// is the name of the service to use. In most cases, we want to use the "login" service.
+        ///
+        /// Note that PAM authentication will only work for a username and password if either:
+        ///
+        /// a. The username matches the one performing the authentication
+        /// b. The user doing authentication has elevated permissions
+        ///
+        /// In other words, an ordinary user cannot authenticate the username and password of a
+        /// different user. This will instead return an error about a wrong password.
+        Pam {
+            username: &'a str,
+            password: &'a str,
+            service: &'a str,
+        },
+    }
+
+    /// Performs password check using the provided [`Method`].
+    pub fn pwcheck(method: Method) -> PwcheckResult {
+        #[cfg(target_os = "linux")]
+        match method {
+            Method::Pam {
+                username,
+                password,
+                service,
+            } => pwcheck_pam(username, password, service),
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            unimplemented!();
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn pwcheck_pam(username: &str, password: &str, service: &str) -> PwcheckResult {
+        use pam_client::conv_mock::Conversation;
+        use pam_client::{Context, ErrorCode, Flag}; // Non-interactive implementation
+                                                    //
+        let mut context = match Context::new(
+            service,
+            None,
+            Conversation::with_credentials(username, password),
+        ) {
+            Ok(x) => x,
+            Err(x) => return PwcheckResult::Err(Box::new(x)),
+        };
+
+        // Do not allow empty passwords, and suppress generated output
+        let flags = Flag::DISALLOW_NULL_AUTHTOK & Flag::SILENT;
+
+        // Authenticate the user
+        match context.authenticate(flags) {
+            Ok(_) => {}
+            Err(x) if x.code() == ErrorCode::AUTH_ERR => return PwcheckResult::WrongPassword,
+            Err(x) => return PwcheckResult::Err(Box::new(x)),
+        }
+
+        // Validate the account
+        match context.acct_mgmt(flags) {
+            Ok(_) => {}
+            Err(x) if x.code() == ErrorCode::AUTH_ERR => return PwcheckResult::WrongPassword,
+            Err(x) => return PwcheckResult::Err(Box::new(x)),
+        }
+
+        // Succeeded, so return ok
+        PwcheckResult::Ok
+    }
+}
+
+#[cfg(any(all(doc, doc_cfg), target_os = "macos"))]
+#[cfg_attr(doc_cfg, doc(cfg(target_os = "macos")))]
+pub mod macos {
     use std::io::{self, Write};
-    use std::sync::mpsc;
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-
     use super::PwcheckResult;
-
-    /// Printed out by our call to echo. We want this to be unique so we can search for it in all
-    /// of the stdout that su prints because it's not guaranteed that su will just print
-    /// "Password:" as part of the prompt each time.
-    const UNIQUE_CONFIRMATION: &str = "THEPASSWORDISOK";
 
     const MACOS_HACK_SLEEP_DURATION: Duration = Duration::from_millis(20);
     const RECHECK_SLEEP_DURATION: Duration = Duration::from_millis(1);
@@ -87,31 +187,61 @@ pub mod unix {
         }};
     }
 
-    /// For the unix implementation of password checking, we're leveraging the `su` tool
-    /// that is commonly available on Linux, MacOS, and the BSDs. Because we are doing a hack
-    /// where we execute `su` and attempt to feed it a password over stdout, a `timeout`
-    /// is used to ensure that we do not continue waiting for success or failure indefinitely
-    /// in the case that something has gone wrong feeding input.
-    ///
-    /// Note that `timeout` is used both to wait for a process to terminate AND to wait to get
-    /// output from a terminated process. This means that `pwcheck` could wait for up to twice the
-    /// timeout if the process concludes exactly at `timeout`, but does not yield any output so we
-    /// wait another `timeout` for the result.
-    pub fn pwcheck(username: &str, password: &str, timeout: Duration) -> PwcheckResult {
+    /// Methods available on MacOS to perform password checks.
+    pub enum Method<'a> {
+        /// Leverage the `dscl` tool.
+        ///
+        /// The `datasource` is used to specify the node name or host. You can read up on this more by
+        /// doing `man dscl`. Providing "." as the datasource will use the local directory of the
+        /// machine.
+        ///
+        /// Because we need to spawn this tool within a tty to feed in a password prompt, a `timeout`
+        /// is used to ensure that we do not continue waiting for success or failure indefinitely in
+        /// the case that something has gone wrong feeding input.
+        Dscl {
+            username: &'a str,
+            password: &'a str,
+            datasource: &'a str,
+            timeout: Option<Duration>,
+        },
+    }
+
+    /// Performs password check using the provided [`Method`].
+    pub fn pwcheck(method: Method) -> PwcheckResult {
+        #[cfg(target_os = "macos")]
+        match method {
+            Method::Dscl {
+                username,
+                password,
+                datasource,
+                timeout,
+            } => pwcheck_dscl(username, password, datasource, timeout),
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            unimplemented!();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn pwcheck_dscl(
+        username: &str,
+        password: &str,
+        datasource: &str,
+        timeout: Option<Duration>,
+    ) -> PwcheckResult {
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
         let pty_system = native_pty_system();
         let pair = unwrap_err!(pty_system.openpty(PtySize::default()));
 
-        // Build and spawn our command in the form of `su -m {USERNAME} -c echo
-        // {UNIQUE_CONFIRMATION}`, which will attempt to log in as the user via a password prompt
-        // on the tty and then execute the command as it passes `-c echo {UNIQUE_CONFIRMATION}` to
-        // the shell.
+        // Build and spawn our command in the form of `dscl . -authonly {username}`. This will
+        // result in an interactive prompt for the password to authenticate the user.
         //
-        // We are assuming that all shells used have a `-c` flag and an echo command available
-        // either on path or built into the shell itself.
+        // Note that supplying "." does validation on the local machine versus an active directory.
         let mut child = unwrap_err!(pair.slave.spawn_command({
-            let mut cmd = CommandBuilder::new("su");
-            cmd.args(["-m", username, "-c"]);
-            cmd.arg(&format!("echo {UNIQUE_CONFIRMATION}"));
+            let mut cmd = CommandBuilder::new("dscl");
+            cmd.args([datasource, "-authonly", username]);
             cmd
         }));
 
@@ -122,17 +252,11 @@ pub mod unix {
         // Read the output in another thread. This is important because it is easy to encounter a
         // situation where read/write buffers fill and block either your process or the spawned
         // process.
-        let (tx, rx) = mpsc::channel();
         let reader = unwrap_err!(pair.master.try_clone_reader());
         thread::spawn(move || {
-            // We block waiting for everything including EOF, which means we should get both a
-            // prompt like "Password:" and the output of our command.
-            let out = io::read_to_string(reader).unwrap();
-
-            // Send the output with newline characters, control characters, etc. removed.
-            let out = out.replace(|c: char| c.is_whitespace() || c.is_control(), "");
-
-            tx.send(out).unwrap();
+            // We block waiting for everything including EOF. If we don't do this, we fail
+            // for some reason. We don't actually use the output, so swallow it.
+            let _ = io::read_to_string(reader);
         });
 
         // Obtain the writer. When the writer is dropped, EOF will be sent to the program that was
@@ -177,14 +301,7 @@ pub mod unix {
                     // get unhappy if it is dropped sooner than that.
                     drop(pair.master);
 
-                    if !status.success() {
-                        return PwcheckResult::WrongPassword;
-                    }
-
-                    // Child has succeeded, and we want to see if we got the confirmation back
-                    let output = unwrap_err!(rx.recv_timeout(timeout));
-
-                    if output.contains(UNIQUE_CONFIRMATION) {
+                    if status.success() {
                         return PwcheckResult::Ok;
                     } else {
                         return PwcheckResult::WrongPassword;
@@ -199,24 +316,20 @@ pub mod unix {
             }
 
             // Check if we have exceeded the timeout, and fail accordingly
-            if start.elapsed() > timeout {
-                // Terminate our process first to make sure we don't leave it hanging.
-                let kill_result = child.kill();
+            if let Some(timeout) = timeout {
+                if start.elapsed() > timeout {
+                    // Terminate our process first to make sure we don't leave it hanging.
+                    let kill_result = child.kill();
 
-                // Take care to drop the master after our processes are done, as some platforms
-                // get unhappy if it is dropped sooner than that.
-                drop(pair.master);
+                    // Take care to drop the master after our processes are done, as some platforms
+                    // get unhappy if it is dropped sooner than that.
+                    drop(pair.master);
 
-                // If we failed to kill the process, return an error
-                unwrap_err!(kill_result);
+                    // If we failed to kill the process, return an error
+                    unwrap_err!(kill_result);
 
-                // We assume that if the process hasn't completed, we supplied the wrong
-                // password and it never concluded.
-                //
-                // NOTE: I'd ideally like to make this a timeout error, but for some reason
-                // the process does not seem to exit normally, so I've converted this into a
-                // password failure report instead.
-                return PwcheckResult::WrongPassword;
+                    return PwcheckResult::Err(Box::new(io::Error::from(io::ErrorKind::TimedOut)));
+                }
             }
 
             // Wait some period of time before rechecking so we don't spike the CPU
@@ -225,29 +338,50 @@ pub mod unix {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(all(doc, doc_cfg), windows))]
 #[cfg_attr(doc_cfg, doc(cfg(windows)))]
 pub mod windows {
-    use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows::Win32::Security::{
-        LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
-    };
-
     use super::PwcheckResult;
 
-    /// For the windows implementation of password checking, we're leveraging the
-    /// [LogonUserW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw)
-    /// function to attempt to log a user on to the local computer.
-    ///
-    /// Note that this function requires the running program to have the [SeTcbPrivilege
-    /// privilege][SeTcbPrivilege] set in order to log in as a user other than the user that
-    /// started the program. So it's safe to use this to validate the account of the user running
-    /// this program, but otherwise it needs a very high-level permission to validate the password,
-    /// typically something you'd see from running the program as an administrator.
-    ///
-    /// [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
-    pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
+    /// Methods available on Windows to perform password checks.
+    pub enum Method<'a> {
+        /// Leverage the [LogonUserW][LogonUserW] function to attempt to log a user on to the local
+        /// computer.
+        ///
+        /// Note that this function requires the running program to have the [SeTcbPrivilege
+        /// privilege][SeTcbPrivilege] set in order to log in as a user other than the user that
+        /// started the program. So it's safe to use this to validate the account of the user running
+        /// this program, but otherwise it needs a very high-level permission to validate the password,
+        /// typically something you'd see from running the program as an administrator.
+        ///
+        /// [LogonUserW]: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw
+        /// [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
+        LogonUserW {
+            username: &'a str,
+            password: &'a str,
+        },
+    }
+
+    /// Performs password check using the provided [`Method`].
+    pub fn pwcheck(method: Method) -> PwcheckResult {
+        #[cfg(windows)]
+        match method {
+            Method::LogonUserW { username, password } => pwcheck_logon_user_w(username, password),
+        }
+        #[cfg(not(windows))]
+        {
+            unimplemented!();
+        }
+    }
+
+    #[cfg(windows)]
+    fn pwcheck_logon_user_w(username: &str, password: &str) -> PwcheckResult {
+        use windows::core::PCWSTR;
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows::Win32::Security::{
+            LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
+        };
+
         // Encode our username and password as utf16 for Windows and ensure we have a null
         // terminator character at the end of each.
         let username: Vec<u16> = username.encode_utf16().chain(Some(0)).collect();
