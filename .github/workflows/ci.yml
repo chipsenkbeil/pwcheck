@@ -125,5 +125,8 @@ jobs:
       - name: Run tests as testuser (Linux)
         run: |
           sudo -u ${{ env.PWCHECK_TEST_USERNAME }} curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain ${{ matrix.rust }}
-          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} bash -c ". \"/home/testuser/.cargo/env\" && cargo test --release --all-features"
+          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} mkdir /home/testuser/pwcheck
+          sudo cp -R . /home/testuser/pwcheck/
+          sudo chown -R ${{ env.PWCHECK_TEST_USERNAME }} /home/testuser/pwcheck/
+          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} bash -c ". \"/home/testuser/.cargo/env\" && cd /home/testuser/pwcheck && cargo test --release --all-features"
         if: matrix.os == 'ubuntu-latest'
