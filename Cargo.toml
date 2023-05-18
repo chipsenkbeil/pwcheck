@@ -1,6 +1,6 @@
 [package]
 name = "pwcheck"
-description = "Provides typed variants of Path and PathBuf for Unix and Windows"
+description = "Provides a function to validate a username & password on Linux, MacOS, and Windows"
 version = "0.1.0"
 edition = "2021"
 authors = ["Chip Senkbeil <chip@senkbeil.org>"]
