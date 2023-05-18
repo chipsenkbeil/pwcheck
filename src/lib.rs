@@ -64,6 +64,8 @@ pub mod linux {
     use pam_client::conv_mock::Conversation;
     use pam_client::{Context, Flag}; // Non-interactive implementation
 
+    use super::PwcheckResult;
+
     /// For the Linux implementation of password checking, we're leveraging PAM to authenticate.
     /// This method accepts a third argument, which is the name of the service to use. In most
     /// cases, we want to use the "login" service.

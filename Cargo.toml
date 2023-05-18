@@ -16,7 +16,7 @@ license = "MIT OR Apache-2.0"
 windows = { version = "0.48", features = ["Win32_Foundation", "Win32_Security"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-pam-client = "0.5.0"
+pam-client = { version = "0.5.0", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 portable-pty = "0.8.1"

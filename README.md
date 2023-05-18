@@ -18,8 +18,19 @@ account on Linux, MacOS, and Windows.
 
 ```toml
 [dependencies]
-pwcheck = "0.1"
+pwcheck = "0.2"
 ```
+
+### Dependencies
+
+* On `Linux`, this leverages PAM bindings and therefore requires PAM developer
+  headersto be available. 
+  * **Debian/Ubuntu:** `apt install libpam0g-dev`
+  * **Fedora/CentOS:** `dnf install pam-devel` (you may also need `dnf install
+    clang` if you get `stddef.h not found`)
+* On `MacOS`, this leverages `su`, and does not need anything additional.
+* On `Windows`, this leverages [windows-rs](https://crates.io/crates/windows)
+  and does not need anything additional.
 
 ## Usage
 
@@ -38,9 +49,14 @@ fn main() {
 
 ## How It Works
 
-### Unix
+### Linux
 
-On Unix platforms, this leverages executing `su` to attempt to log into the user's account and
+On Linux platforms, this leverages PAM with the login service to perform
+authentication in a non-interactive fashion via a username and password.
+
+### MacOS
+
+On MacOS platforms, this leverages executing `su` to attempt to log into the user's account and
 echo out a confirmation string. This requires that `su` be available, the underlying shell be
 able to receive `-c` to execute a command, and `echo UNIQUE_CONFIRMATION` be a valid command.
 
@@ -48,7 +64,7 @@ For most platforms, this will result in using PAM to authenticate the user by th
 which we feed in by running the `su` command in a tty and echoing the user's password into the
 tty as if it was entered manually by a keyboard.
 
-This method acts as a convenience around the `unix` module's implementation, and provides a
+This method acts as a convenience around the `macos` module's implementation, and provides a
 default timeout of 0.5s to wait for a success or failure before timing out.
 
 ### Windows
