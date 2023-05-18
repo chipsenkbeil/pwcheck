@@ -125,5 +125,5 @@ jobs:
       - name: Run tests as testuser (Linux)
         run: |
           sudo -u ${{ env.PWCHECK_TEST_USERNAME }} curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain ${{ matrix.rust }}
-          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} bash -c ". \"$HOME/.cargo/env\" && cargo test --release --all-features"
+          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} bash -c ". \"/home/testuser/.cargo/env\" && cargo test --release --all-features"
         if: matrix.os == 'ubuntu-latest'
