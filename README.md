@@ -76,6 +76,15 @@ fn main() {
 }
 ```
 
+Note that PAM authentication will only work for a username and password if
+either:
+
+a. The username matches the one performing the authentication
+b. The user doing authentication has elevated permissions
+
+In other words, an ordinary user cannot authenticate the username and password
+of a different user. This will instead return an error about a wrong password.
+
 ### MacOS
 
 On MacOS platforms, this leverages executing `dscl` to authenticate the user
@@ -109,12 +118,7 @@ fn main() {
 On Windows platforms, this leverages the [LogonUserW][LogonUserW] function to
 attempt to log a user on to the local computer.
 
-Note that this function requires the running program to have the
-[SeTcbPrivilege privilege][SeTcbPrivilege] set in order to log in as a user
-other than the user that started the program. So it's safe to use this to
-validate the account of the user running this program, but otherwise it needs a
-very high-level permission to validate the password, typically something you'd
-see from running the program as an administrator.
+You can execute the Windows module implementation directly like below:
 
 ```rust,no_run
 use pwcheck::PwcheckResult;
@@ -134,6 +138,13 @@ fn main() {
     }
 }
 ```
+
+Note that this function requires the running program to have the
+[SeTcbPrivilege privilege][SeTcbPrivilege] set in order to log in as a user
+other than the user that started the program. So it's safe to use this to
+validate the account of the user running this program, but otherwise it needs a
+very high-level permission to validate the password, typically something you'd
+see from running the program as an administrator.
 
 [LogonUserW]: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw
 [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system

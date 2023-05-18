@@ -15,6 +15,14 @@ pub struct ReadmeDoctests;
 /// This method acts as a convenience to the `linux` module's implementation, and provides a service
 /// of "login" for use with PAM.
 ///
+/// Note that PAM authentication will only work for a username and password if either:
+///
+/// a. The username matches the one performing the authentication
+/// b. The user doing authentication has elevated permissions
+///
+/// In other words, an ordinary user cannot authenticate the username and password of a
+/// different user. This will instead return an error about a wrong password.
+///
 /// ### MacOS
 ///
 /// On MacOS, this leverages the `dscl` tool with `-authonly` to authenticate the user.
@@ -25,9 +33,8 @@ pub struct ReadmeDoctests;
 ///
 /// ### Windows
 ///
-/// On Windows platforms, this leverages the
-/// [LogonUserW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw)
-/// function to attempt to log a user on to the local computer.
+/// On Windows platforms, this leverages the [LogonUserW][LogonUserW] function to attempt to log a
+/// user on to the local computer.
 ///
 /// Note that this function requires the running program to have the [SeTcbPrivilege
 /// privilege][SeTcbPrivilege] set in order to log in as a user other than the user that started
@@ -37,6 +44,7 @@ pub struct ReadmeDoctests;
 ///
 /// This method acts as a convenience to the `windows` module's implementation.
 ///
+/// [LogonUserW]: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw
 /// [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
 pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
     #[cfg(target_os = "linux")]
@@ -78,6 +86,14 @@ pub mod linux {
     pub enum Method<'a> {
         /// Leveraging PAM to authenticate. This method accepts a third argument, `service`, which
         /// is the name of the service to use. In most cases, we want to use the "login" service.
+        ///
+        /// Note that PAM authentication will only work for a username and password if either:
+        ///
+        /// a. The username matches the one performing the authentication
+        /// b. The user doing authentication has elevated permissions
+        ///
+        /// In other words, an ordinary user cannot authenticate the username and password of a
+        /// different user. This will instead return an error about a wrong password.
         Pam {
             username: &'a str,
             password: &'a str,
