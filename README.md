@@ -123,7 +123,7 @@ fn main() {
     #[cfg(windows)]
     {
         use pwcheck::windows::{Method, pwcheck};
-        match pwcheck::macos::pwcheck(Method::LogonUserW {
+        match pwcheck::windows::pwcheck(Method::LogonUserW {
             username: "username", 
             password: "password", 
         }) {
