@@ -61,10 +61,17 @@ use pwcheck::PwcheckResult;
 
 fn main() {
     #[cfg(target_os = "linux")]
-    match pwcheck::linux::pwcheck("username", "password", "my-service") {
-        PwcheckResult::Ok => println!("Correct username & password!"),
-        PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
-        PwcheckResult::Err(x) => println!("Encountered error: {x}"),
+    {
+        use pwcheck::linux::{Method, pwcheck};
+        match pwcheck(Method::Pam {
+            username: "username",
+            password: "password",
+            service: "my-service",
+        }) {
+            PwcheckResult::Ok => println!("Correct username & password!"),
+            PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
+            PwcheckResult::Err(x) => println!("Encountered error: {x}"),
+        }
     }
 }
 ```
@@ -81,26 +88,54 @@ use pwcheck::PwcheckResult;
 
 fn main() {
     #[cfg(target_os = "macos")]
-    match pwcheck::macos::pwcheck("username", "password", "/Login/Default", None) {
-        PwcheckResult::Ok => println!("Correct username & password!"),
-        PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
-        PwcheckResult::Err(x) => println!("Encountered error: {x}"),
+    {
+        use pwcheck::macos::{Method, pwcheck};
+        match pwcheck::macos::pwcheck(Method::Dscl {
+            username: "username", 
+            password: "password", 
+            datasource: "/Login/Default", 
+            timeout: None,
+        }) {
+            PwcheckResult::Ok => println!("Correct username & password!"),
+            PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
+            PwcheckResult::Err(x) => println!("Encountered error: {x}"),
+        }
     }
 }
 ```
 
 ### Windows
 
-On Windows platforms, this leverages the
-[LogonUserW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw)
-function to attempt to log a user on to the local computer.
+On Windows platforms, this leverages the [LogonUserW][LogonUserW] function to
+attempt to log a user on to the local computer.
 
-Note that this function requires the running program to have the [SeTcbPrivilege
-privilege][SeTcbPrivilege] set in order to log in as a user other than the user that started
-the program. So it's safe to use this to validate the account of the user running this program,
-but otherwise it needs a very high-level permission to validate the password, typically
-something you'd see from running the program as an administrator.
+Note that this function requires the running program to have the
+[SeTcbPrivilege privilege][SeTcbPrivilege] set in order to log in as a user
+other than the user that started the program. So it's safe to use this to
+validate the account of the user running this program, but otherwise it needs a
+very high-level permission to validate the password, typically something you'd
+see from running the program as an administrator.
 
+```rust,no_run
+use pwcheck::PwcheckResult;
+
+fn main() {
+    #[cfg(windows)]
+    {
+        use pwcheck::windows::{Method, pwcheck};
+        match pwcheck::macos::pwcheck(Method::LogonUserW {
+            username: "username", 
+            password: "password", 
+        }) {
+            PwcheckResult::Ok => println!("Correct username & password!"),
+            PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
+            PwcheckResult::Err(x) => println!("Encountered error: {x}"),
+        }
+    }
+}
+```
+
+[LogonUserW]: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw
 [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
 
 ## License

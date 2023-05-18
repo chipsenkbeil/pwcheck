@@ -42,17 +42,26 @@ pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
     #[cfg(target_os = "linux")]
     {
         const SERVICE: &str = "login";
-        linux::pwcheck(username, password, SERVICE)
+        linux::pwcheck(linux::Method::Pam {
+            username,
+            password,
+            service: SERVICE,
+        })
     }
     #[cfg(target_os = "macos")]
     {
         const DATASOURCE: &str = ".";
         const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
-        macos::pwcheck(username, password, DATASOURCE, TIMEOUT)
+        macos::pwcheck(macos::Method::Dscl {
+            username,
+            password,
+            datasource: DATASOURCE,
+            timeout: Some(TIMEOUT),
+        })
     }
     #[cfg(windows)]
     {
-        windows::pwcheck(username, password)
+        windows::pwcheck(windows::Method::LogonUserW { username, password })
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
@@ -60,18 +69,43 @@ pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(all(doc, doc_cfg), target_os = "linux"))]
 #[cfg_attr(doc_cfg, doc(cfg(target_os = "linux")))]
 pub mod linux {
-    use pam_client::conv_mock::Conversation;
-    use pam_client::{Context, ErrorCode, Flag}; // Non-interactive implementation
-
     use super::PwcheckResult;
 
-    /// For the Linux implementation of password checking, we're leveraging PAM to authenticate.
-    /// This method accepts a third argument, `service`, which is the name of the service to use.
-    /// In most cases, we want to use the "login" service.
-    pub fn pwcheck(username: &str, password: &str, service: &str) -> PwcheckResult {
+    /// Methods available on Linux to perform password checks.
+    pub enum Method<'a> {
+        /// Leveraging PAM to authenticate. This method accepts a third argument, `service`, which
+        /// is the name of the service to use. In most cases, we want to use the "login" service.
+        Pam {
+            username: &'a str,
+            password: &'a str,
+            service: &'a str,
+        },
+    }
+
+    /// Performs password check using the provided [`Method`].
+    pub fn pwcheck(method: Method) -> PwcheckResult {
+        #[cfg(target_os = "linux")]
+        match method {
+            Method::Pam {
+                username,
+                password,
+                service,
+            } => pwcheck_pam(username, password, service),
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            unimplemented!();
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn pwcheck_pam(username: &str, password: &str, service: &str) -> PwcheckResult {
+        use pam_client::conv_mock::Conversation;
+        use pam_client::{Context, ErrorCode, Flag}; // Non-interactive implementation
+                                                    //
         let mut context = match Context::new(
             service,
             None,
@@ -103,14 +137,12 @@ pub mod linux {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(all(doc, doc_cfg), target_os = "macos"))]
 #[cfg_attr(doc_cfg, doc(cfg(target_os = "macos")))]
 pub mod macos {
     use std::io::{self, Write};
     use std::thread;
     use std::time::{Duration, Instant};
-
-    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
     use super::PwcheckResult;
 
@@ -139,20 +171,51 @@ pub mod macos {
         }};
     }
 
-    /// For the MacOS implementation of password checking, we're leveraging the `dscl` tool.
-    /// Because we need to spawn this tool within a tty to feed in a password prompt, a `timeout`
-    /// is used to ensure that we do not continue waiting for success or failure indefinitely in
-    /// the case that something has gone wrong feeding input.
-    ///
-    /// The `datasource` is used to specify the node name or host. You can read up on this more by
-    /// doing `man dscl`. Providing "." as the datasource will use the local directory of the
-    /// machine.
-    pub fn pwcheck(
+    /// Methods available on MacOS to perform password checks.
+    pub enum Method<'a> {
+        /// Leverage the `dscl` tool.
+        ///
+        /// The `datasource` is used to specify the node name or host. You can read up on this more by
+        /// doing `man dscl`. Providing "." as the datasource will use the local directory of the
+        /// machine.
+        ///
+        /// Because we need to spawn this tool within a tty to feed in a password prompt, a `timeout`
+        /// is used to ensure that we do not continue waiting for success or failure indefinitely in
+        /// the case that something has gone wrong feeding input.
+        Dscl {
+            username: &'a str,
+            password: &'a str,
+            datasource: &'a str,
+            timeout: Option<Duration>,
+        },
+    }
+
+    /// Performs password check using the provided [`Method`].
+    pub fn pwcheck(method: Method) -> PwcheckResult {
+        #[cfg(target_os = "macos")]
+        match method {
+            Method::Dscl {
+                username,
+                password,
+                datasource,
+                timeout,
+            } => pwcheck_dscl(username, password, datasource, timeout),
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            unimplemented!();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn pwcheck_dscl(
         username: &str,
         password: &str,
         datasource: &str,
-        timeout: impl Into<Option<Duration>>,
+        timeout: Option<Duration>,
     ) -> PwcheckResult {
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
         let pty_system = native_pty_system();
         let pair = unwrap_err!(pty_system.openpty(PtySize::default()));
 
@@ -212,7 +275,6 @@ pub mod macos {
 
         // Keep track of when we started and how long to wait before timing out
         let start = Instant::now();
-        let timeout = timeout.into();
 
         loop {
             // Check if our process has exited, and if so, handle success/failure
@@ -266,29 +328,50 @@ pub mod macos {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(all(doc, doc_cfg), windows))]
 #[cfg_attr(doc_cfg, doc(cfg(windows)))]
 pub mod windows {
-    use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows::Win32::Security::{
-        LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
-    };
-
     use super::PwcheckResult;
 
-    /// For the windows implementation of password checking, we're leveraging the
-    /// [LogonUserW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw)
-    /// function to attempt to log a user on to the local computer.
-    ///
-    /// Note that this function requires the running program to have the [SeTcbPrivilege
-    /// privilege][SeTcbPrivilege] set in order to log in as a user other than the user that
-    /// started the program. So it's safe to use this to validate the account of the user running
-    /// this program, but otherwise it needs a very high-level permission to validate the password,
-    /// typically something you'd see from running the program as an administrator.
-    ///
-    /// [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
-    pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
+    /// Methods available on Windows to perform password checks.
+    pub enum Method<'a> {
+        /// Leverage the [LogonUserW][LogonUserW] function to attempt to log a user on to the local
+        /// computer.
+        ///
+        /// Note that this function requires the running program to have the [SeTcbPrivilege
+        /// privilege][SeTcbPrivilege] set in order to log in as a user other than the user that
+        /// started the program. So it's safe to use this to validate the account of the user running
+        /// this program, but otherwise it needs a very high-level permission to validate the password,
+        /// typically something you'd see from running the program as an administrator.
+        ///
+        /// [LogonUserW]: https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw
+        /// [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
+        LogonUserW {
+            username: &'a str,
+            password: &'a str,
+        },
+    }
+
+    /// Performs password check using the provided [`Method`].
+    pub fn pwcheck(method: Method) -> PwcheckResult {
+        #[cfg(windows)]
+        match method {
+            Method::LogonUserW { username, password } => pwcheck_logon_user_w(username, password),
+        }
+        #[cfg(not(windows))]
+        {
+            unimplemented!();
+        }
+    }
+
+    #[cfg(windows)]
+    fn pwcheck_logon_user_w() {
+        use windows::core::PCWSTR;
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows::Win32::Security::{
+            LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
+        };
+
         // Encode our username and password as utf16 for Windows and ensure we have a null
         // terminator character at the end of each.
         let username: Vec<u16> = username.encode_utf16().chain(Some(0)).collect();
