@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+#![cfg_attr(doc_cfg, feature(doc_cfg))]
 
 #[doc = include_str!("../README.md")]
 #[cfg(doctest)]
@@ -45,6 +46,7 @@ pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
 }
 
 #[cfg(unix)]
+#[cfg_attr(doc_cfg, doc(cfg(unix)))]
 pub mod unix {
     use std::io::{self, Write};
     use std::sync::mpsc;
@@ -224,6 +226,7 @@ pub mod unix {
 }
 
 #[cfg(windows)]
+#[cfg_attr(doc_cfg, doc(cfg(windows)))]
 pub mod windows {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{CloseHandle, HANDLE};

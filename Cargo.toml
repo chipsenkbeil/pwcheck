@@ -2,6 +2,7 @@
 name = "pwcheck"
 description = "Provides a function to validate a username & password on Linux, MacOS, and Windows"
 version = "0.1.0"
+rust-version = "1.64"
 edition = "2021"
 authors = ["Chip Senkbeil <chip@senkbeil.org>"]
 categories = ["authentication"]
@@ -16,3 +17,7 @@ windows = { version = "0.48", features = ["Win32_Foundation", "Win32_Security"] 
 
 [target.'cfg(unix)'.dependencies]
 portable-pty = "0.8.1"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "doc_cfg"]
