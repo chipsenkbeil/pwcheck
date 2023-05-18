@@ -365,7 +365,7 @@ pub mod windows {
     }
 
     #[cfg(windows)]
-    fn pwcheck_logon_user_w() {
+    fn pwcheck_logon_user_w(username: &str, password: &str) -> PwcheckResult {
         use windows::core::PCWSTR;
         use windows::Win32::Foundation::{CloseHandle, HANDLE};
         use windows::Win32::Security::{

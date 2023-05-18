@@ -81,6 +81,7 @@ jobs:
           - { rust: stable, os: windows-latest }
           - { rust: stable, os: macos-latest }
           - { rust: stable, os: ubuntu-latest }
+          - { rust: stable, os: ubuntu-latest, target: x86_64-unknown-linux-musl }
           - { rust: 1.64.0, os: ubuntu-latest }
     steps:
       - uses: actions/checkout@v3
