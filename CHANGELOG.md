@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This release splits out Linux and MacOS support and how they are implemented.
 
+From a high level, `MacOS` now uses `dscl` instead of `su` to authenticate and
+`Linux` now uses `PAM` with the `login` service to authenticate.
+
 ### Added
 
 - `pwcheck::linux` module with `pwcheck::linux::Method` and
