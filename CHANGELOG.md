@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# 0.2.0 (May 17, 2023)
+
+This release splits out Linux and MacOS support and how they are implemented.
+
+### Added
+
+- `pwcheck::linux` module with `pwcheck::linux::Method` and
+  `pwcheck::linux::pwcheck` method that leverages the method.
+- `pwcheck::macos` module with `pwcheck::macos::Method` and
+  `pwcheck::macos::pwcheck` method that leverages the method.
+- `pwcheck::windows::Method` for use with revised `pwcheck::windows::pwcheck`
+  method that leverages the method.
+
+### Changed
+
+- `pwcheck::windows::pwchec` now takes `pwcheck::windows::Method`.
+
+### Removed
+
+- `pwcheck::unix` module has been removed.
+
 # 0.1.0 (May 17, 2023)
 
 This is the first release of the project.
