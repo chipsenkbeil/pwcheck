@@ -9,21 +9,19 @@ pub struct ReadmeDoctests;
 ///
 /// ### Linux
 ///
-/// On Linux platforms, this leverages PAM with the login service to perform authentication in a
+/// On Linux, this leverages PAM with the login service to perform authentication in a
 /// non-interactive fashion via a username and password.
+///
+/// This method acts as a convenience to the `linux` module's implementation, and provides a service
+/// of "login" for use with PAM.
 ///
 /// ### MacOS
 ///
-/// On MacOS platforms, this leverages executing `su` to attempt to log into the user's account and
-/// echo out a confirmation string. This requires that `su` be available, the underlying shell be
-/// able to receive `-c` to execute a command, and `echo UNIQUE_CONFIRMATION` be a valid command.
+/// On MacOS, this leverages the `dscl` tool with `-authonly` to authenticate the user.
 ///
-/// This will result in using PAM to authenticate the user by their password, which we feed in by
-/// running the `su` command in a tty and echoing the user's password into the tty as if it was
-/// entered manually by a keyboard.
-///
-/// This method acts as a convenience around the `macos` module's implementation, and provides a
-/// default timeout of 0.5s to wait for a success or failure before timing out.
+/// This method acts as a convenience to the `macos` module's implementation, and provides a
+/// datasource of "." (local directory) and timeout of 0.5s to wait for a success or failure before
+/// timing out.
 ///
 /// ### Windows
 ///
@@ -37,16 +35,20 @@ pub struct ReadmeDoctests;
 /// but otherwise it needs a very high-level permission to validate the password, typically
 /// something you'd see from running the program as an administrator.
 ///
+/// This method acts as a convenience to the `windows` module's implementation.
+///
 /// [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
 pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
     #[cfg(target_os = "linux")]
     {
-        linux::pwcheck(username, password, "login")
+        const SERVICE: &str = "login";
+        linux::pwcheck(username, password, SERVICE)
     }
     #[cfg(target_os = "macos")]
     {
+        const DATASOURCE: &str = ".";
         const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
-        macos::pwcheck(username, password, TIMEOUT)
+        macos::pwcheck(username, password, DATASOURCE, TIMEOUT)
     }
     #[cfg(windows)]
     {
@@ -67,8 +69,8 @@ pub mod linux {
     use super::PwcheckResult;
 
     /// For the Linux implementation of password checking, we're leveraging PAM to authenticate.
-    /// This method accepts a third argument, which is the name of the service to use. In most
-    /// cases, we want to use the "login" service.
+    /// This method accepts a third argument, `service`, which is the name of the service to use.
+    /// In most cases, we want to use the "login" service.
     pub fn pwcheck(username: &str, password: &str, service: &str) -> PwcheckResult {
         let mut context = match Context::new(
             service,
@@ -79,6 +81,7 @@ pub mod linux {
             Err(x) => return PwcheckResult::Err(Box::new(x)),
         };
 
+        // Do not allow empty passwords, and suppress generated output
         let flags = Flag::DISALLOW_NULL_AUTHTOK & Flag::SILENT;
 
         // Authenticate the user
@@ -104,18 +107,12 @@ pub mod linux {
 #[cfg_attr(doc_cfg, doc(cfg(target_os = "macos")))]
 pub mod macos {
     use std::io::{self, Write};
-    use std::sync::mpsc;
     use std::thread;
     use std::time::{Duration, Instant};
 
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
     use super::PwcheckResult;
-
-    /// Printed out by our call to echo. We want this to be unique so we can search for it in all
-    /// of the stdout that su prints because it's not guaranteed that su will just print
-    /// "Password:" as part of the prompt each time.
-    const UNIQUE_CONFIRMATION: &str = "THEPASSWORDISOK";
 
     const MACOS_HACK_SLEEP_DURATION: Duration = Duration::from_millis(20);
     const RECHECK_SLEEP_DURATION: Duration = Duration::from_millis(1);
@@ -142,30 +139,30 @@ pub mod macos {
         }};
     }
 
-    /// For the MacOS implementation of password checking, we're leveraging the `su` tool. Because
-    /// we are doing a hack where we execute `su` and attempt to feed it a password over stdout, a
-    /// `timeout` is used to ensure that we do not continue waiting for success or failure
-    /// indefinitely in the case that something has gone wrong feeding input.
+    /// For the MacOS implementation of password checking, we're leveraging the `dscl` tool.
+    /// Because we need to spawn this tool within a tty to feed in a password prompt, a `timeout`
+    /// is used to ensure that we do not continue waiting for success or failure indefinitely in
+    /// the case that something has gone wrong feeding input.
     ///
-    /// Note that `timeout` is used both to wait for a process to terminate AND to wait to get
-    /// output from a terminated process. This means that `pwcheck` could wait for up to twice the
-    /// timeout if the process concludes exactly at `timeout`, but does not yield any output so we
-    /// wait another `timeout` for the result.
-    pub fn pwcheck(username: &str, password: &str, timeout: Duration) -> PwcheckResult {
+    /// The `datasource` is used to specify the node name or host. You can read up on this more by
+    /// doing `man dscl`. Providing "." as the datasource will use the local directory of the
+    /// machine.
+    pub fn pwcheck(
+        username: &str,
+        password: &str,
+        datasource: &str,
+        timeout: impl Into<Option<Duration>>,
+    ) -> PwcheckResult {
         let pty_system = native_pty_system();
         let pair = unwrap_err!(pty_system.openpty(PtySize::default()));
 
-        // Build and spawn our command in the form of `su -m {USERNAME} -c echo
-        // {UNIQUE_CONFIRMATION}`, which will attempt to log in as the user via a password prompt
-        // on the tty and then execute the command as it passes `-c echo {UNIQUE_CONFIRMATION}` to
-        // the shell.
+        // Build and spawn our command in the form of `dscl . -authonly {username}`. This will
+        // result in an interactive prompt for the password to authenticate the user.
         //
-        // We are assuming that all shells used have a `-c` flag and an echo command available
-        // either on path or built into the shell itself.
+        // Note that supplying "." does validation on the local machine versus an active directory.
         let mut child = unwrap_err!(pair.slave.spawn_command({
-            let mut cmd = CommandBuilder::new("su");
-            cmd.args(["-m", username, "-c"]);
-            cmd.arg(&format!("echo {UNIQUE_CONFIRMATION}"));
+            let mut cmd = CommandBuilder::new("dscl");
+            cmd.args([datasource, "-authonly", username]);
             cmd
         }));
 
@@ -176,17 +173,11 @@ pub mod macos {
         // Read the output in another thread. This is important because it is easy to encounter a
         // situation where read/write buffers fill and block either your process or the spawned
         // process.
-        let (tx, rx) = mpsc::channel();
         let reader = unwrap_err!(pair.master.try_clone_reader());
         thread::spawn(move || {
-            // We block waiting for everything including EOF, which means we should get both a
-            // prompt like "Password:" and the output of our command.
-            let out = io::read_to_string(reader).unwrap();
-
-            // Send the output with newline characters, control characters, etc. removed.
-            let out = out.replace(|c: char| c.is_whitespace() || c.is_control(), "");
-
-            tx.send(out).unwrap();
+            // We block waiting for everything including EOF. If we don't do this, we fail
+            // for some reason. We don't actually use the output, so swallow it.
+            let _ = io::read_to_string(reader);
         });
 
         // Obtain the writer. When the writer is dropped, EOF will be sent to the program that was
@@ -221,6 +212,7 @@ pub mod macos {
 
         // Keep track of when we started and how long to wait before timing out
         let start = Instant::now();
+        let timeout = timeout.into();
 
         loop {
             // Check if our process has exited, and if so, handle success/failure
@@ -231,14 +223,7 @@ pub mod macos {
                     // get unhappy if it is dropped sooner than that.
                     drop(pair.master);
 
-                    if !status.success() {
-                        return PwcheckResult::WrongPassword;
-                    }
-
-                    // Child has succeeded, and we want to see if we got the confirmation back
-                    let output = unwrap_err!(rx.recv_timeout(timeout));
-
-                    if output.contains(UNIQUE_CONFIRMATION) {
+                    if status.success() {
                         return PwcheckResult::Ok;
                     } else {
                         return PwcheckResult::WrongPassword;
@@ -253,24 +238,26 @@ pub mod macos {
             }
 
             // Check if we have exceeded the timeout, and fail accordingly
-            if start.elapsed() > timeout {
-                // Terminate our process first to make sure we don't leave it hanging.
-                let kill_result = child.kill();
+            if let Some(timeout) = timeout {
+                if start.elapsed() > timeout {
+                    // Terminate our process first to make sure we don't leave it hanging.
+                    let kill_result = child.kill();
 
-                // Take care to drop the master after our processes are done, as some platforms
-                // get unhappy if it is dropped sooner than that.
-                drop(pair.master);
+                    // Take care to drop the master after our processes are done, as some platforms
+                    // get unhappy if it is dropped sooner than that.
+                    drop(pair.master);
 
-                // If we failed to kill the process, return an error
-                unwrap_err!(kill_result);
+                    // If we failed to kill the process, return an error
+                    unwrap_err!(kill_result);
 
-                // We assume that if the process hasn't completed, we supplied the wrong
-                // password and it never concluded.
-                //
-                // NOTE: I'd ideally like to make this a timeout error, but for some reason
-                // the process does not seem to exit normally, so I've converted this into a
-                // password failure report instead.
-                return PwcheckResult::WrongPassword;
+                    // We assume that if the process hasn't completed, we supplied the wrong
+                    // password and it never concluded.
+                    //
+                    // NOTE: I'd ideally like to make this a timeout error, but for some reason
+                    // the process does not seem to exit normally, so I've converted this into a
+                    // password failure report instead.
+                    return PwcheckResult::Err(Box::new(io::Error::from(io::ErrorKind::TimedOut)));
+                }
             }
 
             // Wait some period of time before rechecking so we don't spike the CPU

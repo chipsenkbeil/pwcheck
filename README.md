@@ -28,7 +28,7 @@ pwcheck = "0.2"
   * **Debian/Ubuntu:** `apt install libpam0g-dev`
   * **Fedora/CentOS:** `dnf install pam-devel` (you may also need `dnf install
     clang` if you get `stddef.h not found`)
-* On `MacOS`, this leverages `su`, and does not need anything additional.
+* On `MacOS`, this leverages `dscl`, and does not need anything additional.
 * On `Windows`, this leverages [windows-rs](https://crates.io/crates/windows)
   and does not need anything additional.
 
@@ -54,18 +54,40 @@ fn main() {
 On Linux platforms, this leverages PAM with the login service to perform
 authentication in a non-interactive fashion via a username and password.
 
+You can specify a different service with the Linux module's implementation:
+
+```rust,no_run
+use pwcheck::PwcheckResult;
+
+fn main() {
+    #[cfg(target_os = "linux")]
+    match pwcheck::linux::pwcheck("username", "password") {
+        PwcheckResult::Ok => println!("Correct username & password!"),
+        PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
+        PwcheckResult::Err(x) => println!("Encountered error: {x}"),
+    }
+}
+```
+
 ### MacOS
 
-On MacOS platforms, this leverages executing `su` to attempt to log into the user's account and
-echo out a confirmation string. This requires that `su` be available, the underlying shell be
-able to receive `-c` to execute a command, and `echo UNIQUE_CONFIRMATION` be a valid command.
+On MacOS platforms, this leverages executing `dscl` to authenticate the user
+using the datasource "." (local directory).
 
-For most platforms, this will result in using PAM to authenticate the user by their password,
-which we feed in by running the `su` command in a tty and echoing the user's password into the
-tty as if it was entered manually by a keyboard.
+You can specify a different datasource with the MacOS module's implementation:
 
-This method acts as a convenience around the `macos` module's implementation, and provides a
-default timeout of 0.5s to wait for a success or failure before timing out.
+```rust,no_run
+use pwcheck::PwcheckResult;
+
+fn main() {
+    #[cfg(target_os = "macos")]
+    match pwcheck::macos::pwcheck("username", "password", "/Login/Default", None) {
+        PwcheckResult::Ok => println!("Correct username & password!"),
+        PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
+        PwcheckResult::Err(x) => println!("Encountered error: {x}"),
+    }
+}
+```
 
 ### Windows
 
