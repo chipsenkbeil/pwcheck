@@ -11,6 +11,9 @@
 [rustc_img]: https://img.shields.io/badge/rustc_1.64.0+-lightgray.svg
 [rustc_lnk]: https://blog.rust-lang.org/2022/09/22/Rust-1.64.0.html
 
+Provides a singular function to check and validate the password of a local user
+account on Linux, MacOS, and Windows.
+
 ## Install
 
 ```toml
