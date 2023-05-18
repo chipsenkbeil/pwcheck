@@ -62,7 +62,7 @@ pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
 #[cfg_attr(doc_cfg, doc(cfg(target_os = "linux")))]
 pub mod linux {
     use pam_client::conv_mock::Conversation;
-    use pam_client::{Context, Flag}; // Non-interactive implementation
+    use pam_client::{Context, ErrorCode, Flag}; // Non-interactive implementation
 
     use super::PwcheckResult;
 
@@ -82,13 +82,17 @@ pub mod linux {
         let flags = Flag::DISALLOW_NULL_AUTHTOK & Flag::SILENT;
 
         // Authenticate the user
-        if !context.authenticate(flags).is_ok() {
-            return PwcheckResult::WrongPassword;
+        match context.authenticate(flags) {
+            Ok(_) => {}
+            Err(x) if x.code() == ErrorCode::AUTH_ERR => return PwcheckResult::WrongPassword,
+            Err(x) => return PwcheckResult::Err(Box::new(x)),
         }
 
         // Validate the account
-        if !context.acct_mgmt(flags) {
-            return PwcheckResult::WrongPassword;
+        match context.acct_mgmt(flags) {
+            Ok(_) => {}
+            Err(x) if x.code() == ErrorCode::AUTH_ERR => return PwcheckResult::WrongPassword,
+            Err(x) => return PwcheckResult::Err(Box::new(x)),
         }
 
         // Succeeded, so return ok
