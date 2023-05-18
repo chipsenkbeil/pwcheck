@@ -83,9 +83,8 @@ jobs:
         include:
           - { rust: stable, os: windows-latest }
           - { rust: stable, os: macos-latest }
-          - { rust: stable, os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
-          - { rust: stable, os: ubuntu-latest, target: x86_64-unknown-linux-musl }
-          - { rust: 1.64.0, os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { rust: stable, os: ubuntu-latest }
+          - { rust: 1.64.0, os: ubuntu-latest }
     steps:
       - name: Install PAM devel (Linux)
         run: sudo apt install -y libpam0g-dev
@@ -125,6 +124,6 @@ jobs:
         if: matrix.os != 'ubuntu-latest'
       - name: Run tests as ${{ env.PWCHECK_TEST_USERNAME }} (Linux)
         run: |
-          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain ${{ matrix.rust }} --target ${{ matrix.target }}
-          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} "source \"$HOME/.cargo/env\" && cargo test --release --all-features --target ${{ matrix.target }}"
+          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain ${{ matrix.rust }}
+          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} source "$HOME/.cargo/env" && cargo test --release --all-features
         if: matrix.os == 'ubuntu-latest'

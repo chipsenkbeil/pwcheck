@@ -14,6 +14,9 @@
 Provides a singular function to check and validate the password of a local user
 account on Linux, MacOS, and Windows.
 
+> Currently does not work on Linux using musl due to
+> https://github.com/1wilkens/pam/issues/25. Will result in SIGSEGV!
+
 ## Install
 
 ```toml
