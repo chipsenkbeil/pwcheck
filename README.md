@@ -61,7 +61,7 @@ use pwcheck::PwcheckResult;
 
 fn main() {
     #[cfg(target_os = "linux")]
-    match pwcheck::linux::pwcheck("username", "password") {
+    match pwcheck::linux::pwcheck("username", "password", "my-service") {
         PwcheckResult::Ok => println!("Correct username & password!"),
         PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
         PwcheckResult::Err(x) => println!("Encountered error: {x}"),
