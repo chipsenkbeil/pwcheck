@@ -32,7 +32,7 @@ pub struct ReadmeDoctests;
 /// something you'd see from running the program as an administrator.
 ///
 /// [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
-pub fn pwcheck(username: &str, password: &str) -> PwCheckResult {
+pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
     #[cfg(unix)]
     {
         const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
@@ -53,7 +53,7 @@ pub mod unix {
 
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
-    use super::PwCheckResult;
+    use super::PwcheckResult;
 
     /// Printed out by our call to echo. We want this to be unique so we can search for it in all
     /// of the stdout that su prints because it's not guaranteed that su will just print
@@ -63,11 +63,11 @@ pub mod unix {
     const MACOS_HACK_SLEEP_DURATION: Duration = Duration::from_millis(20);
     const RECHECK_SLEEP_DURATION: Duration = Duration::from_millis(1);
 
-    /// Converts `x` into a [`PwCheckResult`] of the `Err` variant that uses a [`std::io::Error`]
+    /// Converts `x` into a [`PwcheckResult`] of the `Err` variant that uses a [`std::io::Error`]
     /// to represent the error itself.
     macro_rules! make_err {
         ($x:expr) => {{
-            PwCheckResult::Err(Box::new(io::Error::new(
+            PwcheckResult::Err(Box::new(io::Error::new(
                 io::ErrorKind::Other,
                 $x.to_string(),
             )))
@@ -75,7 +75,7 @@ pub mod unix {
     }
 
     /// Converts `x` (of type [`Result`]) into its underlying `Ok` variant. If `x` is the `Err`
-    /// variant, it will instead be converted into a [`PwCheckResult`] and returned.
+    /// variant, it will instead be converted into a [`PwcheckResult`] and returned.
     macro_rules! unwrap_err {
         ($x:expr) => {{
             match $x {
@@ -99,7 +99,7 @@ pub mod unix {
         username: &str,
         password: &str,
         timeout: impl Into<Option<Duration>>,
-    ) -> PwCheckResult {
+    ) -> PwcheckResult {
         let pty_system = native_pty_system();
         let pair = unwrap_err!(pty_system.openpty(PtySize::default()));
 
@@ -181,7 +181,7 @@ pub mod unix {
                     drop(pair.master);
 
                     if !status.success() {
-                        return PwCheckResult::WrongPassword;
+                        return PwcheckResult::WrongPassword;
                     }
 
                     // Child has succeeded, and we want to see if we got the confirmation back
@@ -192,9 +192,9 @@ pub mod unix {
                     };
 
                     if output.contains(UNIQUE_CONFIRMATION) {
-                        return PwCheckResult::Ok;
+                        return PwcheckResult::Ok;
                     } else {
-                        return PwCheckResult::WrongPassword;
+                        return PwcheckResult::WrongPassword;
                     }
                 }
 
@@ -202,7 +202,7 @@ pub mod unix {
                 Ok(None) => {}
 
                 // Unexpcted error occurred, so fail
-                Err(x) => return PwCheckResult::Err(Box::new(x)),
+                Err(x) => return PwcheckResult::Err(Box::new(x)),
             }
 
             // Check if we have exceeded the timeout, and fail accordingly
@@ -224,7 +224,7 @@ pub mod unix {
                     // NOTE: I'd ideally like to make this a timeout error, but for some reason
                     // the process does not seem to exit normally, so I've converted this into a
                     // password failure report instead.
-                    return PwCheckResult::WrongPassword;
+                    return PwcheckResult::WrongPassword;
                 }
             }
 
@@ -242,7 +242,7 @@ pub mod windows {
         LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
     };
 
-    use super::PwCheckResult;
+    use super::PwcheckResult;
 
     /// For the windows implementation of password checking, we're leveraging the
     /// [LogonUserW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw)
@@ -255,7 +255,7 @@ pub mod windows {
     /// typically something you'd see from running the program as an administrator.
     ///
     /// [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
-    pub fn pwcheck(username: &str, password: &str) -> PwCheckResult {
+    pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
         // Encode our username and password as utf16 for Windows and ensure we have a null
         // terminator character at the end of each.
         let username: Vec<u16> = username.encode_utf16().chain(Some(0)).collect();
@@ -307,9 +307,9 @@ pub mod windows {
         }
 
         if result {
-            PwCheckResult::Ok
+            PwcheckResult::Ok
         } else {
-            PwCheckResult::WrongPassword
+            PwcheckResult::WrongPassword
         }
     }
 }
@@ -320,7 +320,7 @@ pub mod windows {
 /// * The check was a failure and the password was incorrect for the user.
 /// * The check failed unexpectedly and returned an error.
 #[derive(Debug)]
-pub enum PwCheckResult {
+pub enum PwcheckResult {
     /// Password is valid for specified user
     Ok,
 
@@ -331,7 +331,7 @@ pub enum PwCheckResult {
     Err(Box<dyn std::error::Error>),
 }
 
-impl PwCheckResult {
+impl PwcheckResult {
     /// Returns true if this result is a success.
     pub fn is_ok(&self) -> bool {
         matches!(self, Self::Ok)
@@ -376,18 +376,18 @@ mod tests {
     #[test]
     fn should_return_ok_if_password_is_correct_for_the_user() {
         match pwcheck(TEST_USERNAME, TEST_PASSWORD) {
-            PwCheckResult::Ok => {}
-            PwCheckResult::WrongPassword => panic!("Failed with wrong password"),
-            PwCheckResult::Err(x) => panic!("Failed unexpectedly: {x}"),
+            PwcheckResult::Ok => {}
+            PwcheckResult::WrongPassword => panic!("Failed with wrong password"),
+            PwcheckResult::Err(x) => panic!("Failed unexpectedly: {x}"),
         }
     }
 
     #[test]
     fn should_return_wrong_password_if_password_is_incorrect_for_the_user() {
         match pwcheck(TEST_USERNAME, &format!("wrong{TEST_PASSWORD}wrong")) {
-            PwCheckResult::WrongPassword => {}
-            PwCheckResult::Ok => panic!("Succeeded unexpectedly with wrong password"),
-            PwCheckResult::Err(x) => panic!("Failed unexpectedly: {x}"),
+            PwcheckResult::WrongPassword => {}
+            PwcheckResult::Ok => panic!("Succeeded unexpectedly with wrong password"),
+            PwcheckResult::Err(x) => panic!("Failed unexpectedly: {x}"),
         }
     }
 }

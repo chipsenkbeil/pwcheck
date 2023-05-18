@@ -29,9 +29,9 @@ use pwcheck::*;
 fn main() {
     // Check if some username/password combo is valid
     match pwcheck("username", "password") {
-        PwCheckResult::Ok => println!("Correct username & password!"),
-        PwCheckResult::WrongPassword => println!("Incorrect username & password!"),
-        PwCheckResult::Err(x) => println!("Encountered error: {x}"),
+        PwcheckResult::Ok => println!("Correct username & password!"),
+        PwcheckResult::WrongPassword => println!("Incorrect username & password!"),
+        PwcheckResult::Err(x) => println!("Encountered error: {x}"),
     }
 }
 ```
