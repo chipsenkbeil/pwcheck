@@ -7,17 +7,22 @@ pub struct ReadmeDoctests;
 
 /// Checks the password against the specified username.
 ///
-/// ### Unix
+/// ### Linux
 ///
-/// On Unix platforms, this leverages executing `su` to attempt to log into the user's account and
+/// On Linux platforms, this leverages PAM with the login service to perform authentication in a
+/// non-interactive fashion via a username and password.
+///
+/// ### MacOS
+///
+/// On MacOS platforms, this leverages executing `su` to attempt to log into the user's account and
 /// echo out a confirmation string. This requires that `su` be available, the underlying shell be
 /// able to receive `-c` to execute a command, and `echo UNIQUE_CONFIRMATION` be a valid command.
 ///
-/// For most platforms, this will result in using PAM to authenticate the user by their password,
-/// which we feed in by running the `su` command in a tty and echoing the user's password into the
-/// tty as if it was entered manually by a keyboard.
+/// This will result in using PAM to authenticate the user by their password, which we feed in by
+/// running the `su` command in a tty and echoing the user's password into the tty as if it was
+/// entered manually by a keyboard.
 ///
-/// This method acts as a convenience around the `unix` module's implementation, and provides a
+/// This method acts as a convenience around the `macos` module's implementation, and provides a
 /// default timeout of 0.5s to wait for a success or failure before timing out.
 ///
 /// ### Windows
@@ -34,20 +39,64 @@ pub struct ReadmeDoctests;
 ///
 /// [SeTcbPrivilege]: https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/act-as-part-of-the-operating-system
 pub fn pwcheck(username: &str, password: &str) -> PwcheckResult {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
+    {
+        linux::pwcheck(username, password, "login")
+    }
+    #[cfg(target_os = "macos")]
     {
         const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
-        unix::pwcheck(username, password, TIMEOUT)
+        macos::pwcheck(username, password, TIMEOUT)
     }
     #[cfg(windows)]
     {
         windows::pwcheck(username, password)
     }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        compile_error!("Only Linux, MacOS, and Windows are supported!");
+    }
 }
 
-#[cfg(unix)]
-#[cfg_attr(doc_cfg, doc(cfg(unix)))]
-pub mod unix {
+#[cfg(target_os = "linux")]
+#[cfg_attr(doc_cfg, doc(cfg(target_os = "linux")))]
+pub mod linux {
+    use pam_client::conv_mock::Conversation;
+    use pam_client::{Context, Flag}; // Non-interactive implementation
+
+    /// For the Linux implementation of password checking, we're leveraging PAM to authenticate.
+    /// This method accepts a third argument, which is the name of the service to use. In most
+    /// cases, we want to use the "login" service.
+    pub fn pwcheck(username: &str, password: &str, service: &str) -> PwcheckResult {
+        let mut context = match Context::new(
+            service,
+            None,
+            Conversation::with_credentials(username, password),
+        ) {
+            Ok(x) => x,
+            Err(x) => return PwcheckResult::Err(Box::new(x)),
+        };
+
+        let flags = Flag::DISALLOW_NULL_AUTHTOK & Flag::SILENT;
+
+        // Authenticate the user
+        if !context.authenticate(flags).is_ok() {
+            return PwcheckResult::WrongPassword;
+        }
+
+        // Validate the account
+        if !context.acct_mgmt(flags) {
+            return PwcheckResult::WrongPassword;
+        }
+
+        // Succeeded, so return ok
+        PwcheckResult::Ok
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[cfg_attr(doc_cfg, doc(cfg(target_os = "macos")))]
+pub mod macos {
     use std::io::{self, Write};
     use std::sync::mpsc;
     use std::thread;
@@ -87,11 +136,10 @@ pub mod unix {
         }};
     }
 
-    /// For the unix implementation of password checking, we're leveraging the `su` tool
-    /// that is commonly available on Linux, MacOS, and the BSDs. Because we are doing a hack
-    /// where we execute `su` and attempt to feed it a password over stdout, a `timeout`
-    /// is used to ensure that we do not continue waiting for success or failure indefinitely
-    /// in the case that something has gone wrong feeding input.
+    /// For the MacOS implementation of password checking, we're leveraging the `su` tool. Because
+    /// we are doing a hack where we execute `su` and attempt to feed it a password over stdout, a
+    /// `timeout` is used to ensure that we do not continue waiting for success or failure
+    /// indefinitely in the case that something has gone wrong feeding input.
     ///
     /// Note that `timeout` is used both to wait for a process to terminate AND to wait to get
     /// output from a terminated process. This means that `pwcheck` could wait for up to twice the
