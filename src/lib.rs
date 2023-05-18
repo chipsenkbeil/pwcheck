@@ -121,7 +121,13 @@ pub mod linux {
     fn pwcheck_pam(username: &str, password: &str, service: &str) -> PwcheckResult {
         use pam_client::conv_mock::Conversation;
         use pam_client::{Context, ErrorCode, Flag}; // Non-interactive implementation
-                                                    //
+
+        // musl will segfault when using pam-sys at the moment, so catch it and fail with an error
+        // instead
+        if cfg!(target_env = "musl") {
+            return PwcheckResult::Err(Box::from("musl target unsupported"));
+        }
+
         let mut context = match Context::new(
             service,
             None,
