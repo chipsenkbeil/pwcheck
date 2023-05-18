@@ -312,12 +312,6 @@ pub mod macos {
                     // If we failed to kill the process, return an error
                     unwrap_err!(kill_result);
 
-                    // We assume that if the process hasn't completed, we supplied the wrong
-                    // password and it never concluded.
-                    //
-                    // NOTE: I'd ideally like to make this a timeout error, but for some reason
-                    // the process does not seem to exit normally, so I've converted this into a
-                    // password failure report instead.
                     return PwcheckResult::Err(Box::new(io::Error::from(io::ErrorKind::TimedOut)));
                 }
             }

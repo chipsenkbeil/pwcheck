@@ -65,7 +65,7 @@ jobs:
           toolchain: stable
           components: rustfmt
       - name: Install PAM devel (Linux)
-        run: apt install -y libpam0g-dev
+        run: sudo apt install -y libpam0g-dev
         if: matrix.os == 'ubuntu-latest'
       - uses: Swatinem/rust-cache@v2
       - name: Check Cargo availability
@@ -95,7 +95,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
       - name: Install PAM devel (Linux)
-        run: apt install -y libpam0g-dev
+        run: sudo apt install -y libpam0g-dev
         if: matrix.os == 'ubuntu-latest'
       - name: Generate randoms
         uses: joellefkowitz/random-env@v1.0.0
