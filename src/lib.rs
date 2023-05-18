@@ -95,11 +95,7 @@ pub mod unix {
     /// output from a terminated process. This means that `pwcheck` could wait for up to twice the
     /// timeout if the process concludes exactly at `timeout`, but does not yield any output so we
     /// wait another `timeout` for the result.
-    pub fn pwcheck(
-        username: &str,
-        password: &str,
-        timeout: impl Into<Option<Duration>>,
-    ) -> PwcheckResult {
+    pub fn pwcheck(username: &str, password: &str, timeout: Duration) -> PwcheckResult {
         let pty_system = native_pty_system();
         let pair = unwrap_err!(pty_system.openpty(PtySize::default()));
 
@@ -169,7 +165,6 @@ pub mod unix {
 
         // Keep track of when we started and how long to wait before timing out
         let start = Instant::now();
-        let timeout = timeout.into();
 
         loop {
             // Check if our process has exited, and if so, handle success/failure
@@ -185,11 +180,7 @@ pub mod unix {
                     }
 
                     // Child has succeeded, and we want to see if we got the confirmation back
-                    let output = if let Some(timeout) = timeout {
-                        unwrap_err!(rx.recv_timeout(timeout))
-                    } else {
-                        unwrap_err!(rx.recv())
-                    };
+                    let output = unwrap_err!(rx.recv_timeout(timeout));
 
                     if output.contains(UNIQUE_CONFIRMATION) {
                         return PwcheckResult::Ok;
@@ -206,26 +197,24 @@ pub mod unix {
             }
 
             // Check if we have exceeded the timeout, and fail accordingly
-            if let Some(threshold) = timeout {
-                if start.elapsed() > threshold {
-                    // Terminate our process first to make sure we don't leave it hanging.
-                    let kill_result = child.kill();
+            if start.elapsed() > timeout {
+                // Terminate our process first to make sure we don't leave it hanging.
+                let kill_result = child.kill();
 
-                    // Take care to drop the master after our processes are done, as some platforms
-                    // get unhappy if it is dropped sooner than that.
-                    drop(pair.master);
+                // Take care to drop the master after our processes are done, as some platforms
+                // get unhappy if it is dropped sooner than that.
+                drop(pair.master);
 
-                    // If we failed to kill the process, return an error
-                    unwrap_err!(kill_result);
+                // If we failed to kill the process, return an error
+                unwrap_err!(kill_result);
 
-                    // We assume that if the process hasn't completed, we supplied the wrong
-                    // password and it never concluded.
-                    //
-                    // NOTE: I'd ideally like to make this a timeout error, but for some reason
-                    // the process does not seem to exit normally, so I've converted this into a
-                    // password failure report instead.
-                    return PwcheckResult::WrongPassword;
-                }
+                // We assume that if the process hasn't completed, we supplied the wrong
+                // password and it never concluded.
+                //
+                // NOTE: I'd ideally like to make this a timeout error, but for some reason
+                // the process does not seem to exit normally, so I've converted this into a
+                // password failure report instead.
+                return PwcheckResult::WrongPassword;
             }
 
             // Wait some period of time before rechecking so we don't spike the CPU
