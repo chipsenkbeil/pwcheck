@@ -122,8 +122,8 @@ jobs:
       - name: Run tests (MacOS/Windows)
         run: cargo test --release --all-features
         if: matrix.os != 'ubuntu-latest'
-      - name: Run tests as ${{ env.PWCHECK_TEST_USERNAME }} (Linux)
+      - name: Run tests as testuser (Linux)
         run: |
           sudo -u ${{ env.PWCHECK_TEST_USERNAME }} curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain ${{ matrix.rust }}
-          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} sh -c "source \"$HOME/.cargo/env\" && cargo test --release --all-features"
+          sudo -u ${{ env.PWCHECK_TEST_USERNAME }} bash -c ". \"$HOME/.cargo/env\" && cargo test --release --all-features"
         if: matrix.os == 'ubuntu-latest'
